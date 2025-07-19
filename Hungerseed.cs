@@ -208,7 +208,6 @@ public static class Hungerseed
                                     Target.FifteenFootCone()).WithActionCost(2))
                             ]
                         }
-
                     ]
                 };
             });
@@ -235,6 +234,7 @@ public static class Hungerseed
         return new TrueFeat(HungerseedFeat.GreaterTransformation, 9, "You can assume your oni form more easily, and with greater benefits.",
                 "Your oni form lasts for 10 minutes without the need to Sustain it. While in your oni form, your reach increases by 5 feet.",
                 [HungerseedTrait.Hungerseed])
+            .WithPrerequisite(HungerseedFeat.OniForm, "Oni Form")
             .WithPermanentQEffectAndSameRulesText(q =>
             {
                 q.Id = HungerseedQEffects.GreaterOniForm;
