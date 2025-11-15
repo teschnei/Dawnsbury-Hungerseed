@@ -8,6 +8,7 @@ using Dawnsbury.Core.CharacterBuilder.FeatsDb.Spellbook;
 using Dawnsbury.Core.CharacterBuilder.Spellcasting;
 using Dawnsbury.Core.CombatActions;
 using Dawnsbury.Core.Creatures;
+using Dawnsbury.Core.Creatures.Parts;
 using Dawnsbury.Core.Mechanics;
 using Dawnsbury.Core.Mechanics.Core;
 using Dawnsbury.Core.Mechanics.Enumerations;
@@ -17,6 +18,7 @@ using Dawnsbury.Core.Possibilities;
 using Dawnsbury.Display.Text;
 using Dawnsbury.Mods.Heritages.Hungerseed.RegisteredComponents;
 using Humanizer;
+using Microsoft.Xna.Framework;
 using static Dawnsbury.Mods.Heritages.Hungerseed.HungerseedClassLoader;
 
 namespace Dawnsbury.Mods.Heritages.Hungerseed;
@@ -81,47 +83,78 @@ public static class Hungerseed
     [Feat(1)]
     public static Feat OniForm()
     {
-        return new TrueFeat(HungerseedFeat.OniForm, 1, "Your horns flash briefly as you grow in size and ferocity.", "Your size increases. You gain a +1 Status bonus to Intimidation checks. You can Sustain your Oni Form for up to 10 minutes.", [HungerseedTrait.Hungerseed, Trait.Homebrew])
+        return new TrueFeat(HungerseedFeat.OniForm, 1, "Your horns flash briefly as you grow in size and ferocity.", "Your size increases to Large, and you're clumsy 1. You can Sustain your Oni Form for up to 10 minutes.", [HungerseedTrait.Hungerseed])
             .WithActionCost(1)
             .WithPermanentQEffectAndSameRulesText(q =>
             {
-                q.ProvideMainAction = q => q.Owner.HasEffect(HungerseedQEffects.OniFormUsed) || q.Owner.HasEffect(HungerseedQEffects.GreaterOniForm) ? null :
-                    new ActionPossibility(new CombatAction(q.Owner,
-                                IllustrationName.DemonMask,
-                                "Oni Form",
-                                [Trait.Concentrate, HungerseedTrait.Hungerseed, Trait.Polymorph, Trait.Primal, Trait.Basic],
-                                "Unleash your Oni Form to gain a +1 Status bonus to Intimidation checks. You can Sustain your Oni Form for up to 10 minutes.",
-                                Target.Self())
-                        .WithActionCost(1)
-                        .WithEffectOnSelf(cr =>
-                        {
-                            q.Owner.AddQEffect(new QEffect()
+                q.ProvideMainAction = q => 
+                {
+                    var greater = q.Owner.HasEffect(HungerseedQEffects.GreaterOniForm);
+                    return q.Owner.HasEffect(HungerseedQEffects.OniFormUsed) || q.Owner.Space.Size >= Size.Large ? null :
+                        new ActionPossibility(new CombatAction(q.Owner,
+                                    IllustrationName.DemonMask,
+                                    greater ? "Greater Oni Form" : "Oni Form",
+                                    [Trait.Concentrate, HungerseedTrait.Hungerseed, Trait.Polymorph, Trait.Primal, Trait.Basic],
+                                    greater ? "Unleash your Oni Form to increase your size to Large and reach by 5 feet, and become clumsy 1 until the end of the encounter." : "Unleash your Oni Form to increase your size to Large and become clumsy 1. You can Sustain your Oni Form for up to 10 minutes.",
+                                    Target.Self())
+                            .WithActionCost(1)
+                            .WithEffectOnChosenTargets(async (action, cr, targets) =>
                             {
-                                Id = HungerseedQEffects.OniFormUsed
-                            });
-                            cr.AddQEffect(new QEffect("Oni Form", "Your Oni Form is unleashed, granting you a +1 Status bonus to Intimidation checks.",
-                                    ExpirationCondition.ExpiresAtEndOfSourcesTurn,
-                                    cr, IllustrationName.DemonMask)
-                            {
-                                Id = HungerseedQEffects.OniForm,
-                                CannotExpireThisTurn = true,
-                                BonusToSkillChecks = (skill, action, cr) => skill == Skill.Intimidation ? new Bonus(1, BonusType.Status, "Oni Form") : null,
-                                ProvideContextualAction = q => q.CannotExpireThisTurn ? null : new ActionPossibility(new CombatAction(
-                                        q.Owner,
-                                        IllustrationName.DemonMask,
-                                        "Sustain Oni Form",
-                                        [Trait.Concentrate, Trait.SustainASpell, Trait.Basic, Trait.DoesNotBreakStealth],
-                                        "The duration of Oni Form continues until the end of your next turn.", Target.Self()
-                                    )
-                                    .WithReferencedQEffect(q)
-                                    .WithEffectOnSelf(async (action, cr) =>
+                                var oldSize = cr.Space.Size;
+                                var oldLong = cr.Space.Long;
+                                if (await cr.Space.GrowTo(Size.Large))
+                                {
+                                    cr.Space.Long = greater ? false : true;
+                                    cr.AddQEffect(new QEffect()
                                     {
-                                        q.CannotExpireThisTurn = true;
-                                    })
-                                ).WithPossibilityGroup("Maintain an activity")
-                            });
-                        })
-                    );
+                                        Id = HungerseedQEffects.OniFormUsed,
+                                        StateCheckWithVisibleChanges = async q =>
+                                        {
+                                            if (q.Tag is bool tag && tag == true)
+                                            {
+                                                await q.Owner.Space.GrowTo(oldSize);
+                                                cr.Space.Long = oldLong;
+                                            }
+                                        }
+                                    });
+                                    cr.AddQEffect(new QEffect("Oni Form", "Your Oni Form is unleashed, increasing your size but making you clumsy 1.",
+                                            greater ? ExpirationCondition.Never : ExpirationCondition.ExpiresAtEndOfSourcesTurn,
+                                            cr, IllustrationName.DemonMask)
+                                    {
+                                        Id = HungerseedQEffects.OniForm,
+                                        CannotExpireThisTurn = true,
+                                        StateCheck = q => q.Owner.AddQEffect(QEffect.Clumsy(1).WithExpirationEphemeral()),
+                                        WhenExpires = q => 
+                                        {
+                                            var qe = q.Owner.FindQEffect(HungerseedQEffects.OniFormUsed);
+                                            if (qe != null)
+                                            {
+                                                qe.Tag = true;
+                                            }
+                                        },
+                                        ProvideContextualAction = q => q.CannotExpireThisTurn || greater ? null : new ActionPossibility(new CombatAction(
+                                                q.Owner,
+                                                IllustrationName.DemonMask,
+                                                "Sustain Oni Form",
+                                                [Trait.Concentrate, Trait.SustainASpell, Trait.Basic, Trait.DoesNotBreakStealth],
+                                                "The duration of Oni Form continues until the end of your next turn.", Target.Self()
+                                            )
+                                            .WithReferencedQEffect(q)
+                                            .WithEffectOnSelf(async (action, cr) =>
+                                            {
+                                                q.CannotExpireThisTurn = true;
+                                            })
+                                        ).WithPossibilityGroup("Maintain an activity")
+                                    });
+                                }
+                                else
+                                {
+					                cr.Overhead("nowhere to grow", Color.Red, cr.ToColoredBoldedName() + " cannot be enlarged because there is no space to fit the creature's enlarged form.");
+					                action.RevertRequested = true;
+                                }
+                            })
+                        );
+                };
             });
     }
 
@@ -161,7 +194,7 @@ public static class Hungerseed
                     $"Storming Gaze ({kind.Humanize()})",
                     [HungerseedTrait.Hungerseed, Trait.Primal, DamageKindExtensions.DamageKindToTrait(kind), Trait.Basic],
                     $"You deal {S.HeightenedVariable((caster.Level + 1) / 2, 3)}d4 {kind.Humanize(LetterCasing.LowerCase)} damage in a 15-foot cone. Each creature in the area must attempt a basic Reflex saving throw against your spell DC. You can't use this ability again for 1d4 rounds.",
-                    Target.FifteenFootCone())
+                    Target.FifteenFootCone().WithAdditionalRequirementOnCaster(cr => cr.HasEffect(HungerseedQEffects.StormingGazeCD) ? Usability.NotUsable("Storming Gaze was used recently and must recover before being usable again.") : Usability.Usable))
                 .WithHeighteningNumerical(caster.Level, 5, true, 2, "The damage increases by 1d4.")
                 .WithActionCost(2)
                 .WithSavingThrow(new SavingThrow(Defense.Reflex, cr => cr?.ClassOrSpellDC() ?? 0))
@@ -185,7 +218,7 @@ public static class Hungerseed
             .WithActionCost(2)
             .WithPermanentQEffect(null, q =>
             {
-                q.ProvideMainAction = qe => qe.Owner.HasEffect(HungerseedQEffects.StormingGazeCD) ? null : new SubmenuPossibility(IllustrationName.Seek, "Storming Gaze")
+                q.ProvideMainAction = qe => new SubmenuPossibility(IllustrationName.Seek, "Storming Gaze")
                 {
                     Subsections =
                     [
@@ -238,34 +271,6 @@ public static class Hungerseed
             .WithPermanentQEffectAndSameRulesText(q =>
             {
                 q.Id = HungerseedQEffects.GreaterOniForm;
-                q.ProvideMainAction = q => q.Owner.HasEffect(HungerseedQEffects.OniFormUsed) ? null :
-                    new ActionPossibility(new CombatAction(q.Owner,
-                                IllustrationName.DemonMask,
-                                "Greater Oni Form",
-                                [Trait.Concentrate, HungerseedTrait.Hungerseed, Trait.Polymorph, Trait.Primal, Trait.Basic],
-                                "Unleash your Oni Form to gain a +1 Status bonus to Intimidation checks and increased reach.",
-                                Target.Self())
-                        .WithActionCost(1)
-                        .WithEffectOnSelf(cr =>
-                        {
-                            q.Owner.AddQEffect(new QEffect()
-                            {
-                                Id = HungerseedQEffects.OniFormUsed
-                            });
-                            foreach (var w in q.Owner.Weapons)
-                            {
-                                w.Traits.Add(Trait.Reach);
-                            }
-                            cr.AddQEffect(new QEffect("Greater Oni Form", "Your Oni Form is unleashed, granting you a +1 Status bonus to Intimidation checks and increased reach",
-                                    ExpirationCondition.Never,
-                                    cr, IllustrationName.DemonMask)
-                            {
-                                Id = HungerseedQEffects.OniForm,
-                                CannotExpireThisTurn = true,
-                                BonusToSkillChecks = (skill, action, cr) => skill == Skill.Intimidation ? new Bonus(1, BonusType.Status, "Greater Oni Form") : null
-                            });
-                        })
-                    );
             });
     }
 }
