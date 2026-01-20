@@ -1,4 +1,1 @@
-Hungerseed versatile heritage for Dawnsbury Days
-
-
-See Licensing/ORC copyright notice.html for ORC License
+Moved to https://codeberg.org/junabell/Dawnsbury-Hungerseed
